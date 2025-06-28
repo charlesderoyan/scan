@@ -1,0 +1,269 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Simulateur Scanner A4</title>
+  <style>
+    body {
+      background: #111;
+      color: white;
+      font-family: sans-serif;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #scanner {
+      position: relative;
+      width: 1280px;
+      height: 905px;
+      background: #222;
+      border: 2px solid #555;
+      margin-top: 20px;
+      overflow: hidden;
+    }
+    .image {
+      position: absolute;
+      cursor: grab;
+      user-select: none;
+    }
+    #scan-line {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10px;
+      height: 100%;
+      background: lime;
+      z-index: 10;
+      display: none;
+    }
+    #output {
+
+      margin-top: 20px;
+      background: #333;
+      width: 1280px;
+      height: 905px;
+      image-rendering: pixelated;
+    
+      outline: 2px solid white;
+    button, input {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simulateur Scanner A4</h1>
+  <input type="file" id="fileInput" multiple accept="image/*">
+  <label style="margin-top:20px;">Pas du scan (px) : <input type="number" id="scanStep" min="1" max="30" value="15" style="width: 60px;"></label>
+  <button onclick="startScan()">Démarrer le scan</button>
+  <div id="scanner">
+    <div id="scan-line"></div>
+  </div>
+  <canvas id="output"></canvas>
+<div id="outputGrid" style="display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; margin-top: 20px; width: 1280px; height: 905px;">
+  <canvas class="alt-output" width="640" height="452"></canvas>
+  <canvas class="alt-output" width="640" height="452"></canvas>
+  <canvas class="alt-output" width="640" height="452"></canvas>
+  <canvas class="alt-output" width="640" height="452"></canvas>
+</div>
+
+  <script>
+    const scanner = document.getElementById('scanner');
+    const scanLine = document.getElementById('scan-line');
+    const output = document.getElementById('output');
+    const ctx = output.getContext('2d');
+    output.width = 1280;
+    output.height = 905;
+
+    const images = [];
+    const scannedSlices = [];
+
+    document.getElementById('fileInput').addEventListener('change', e => {
+      Array.from(e.target.files).forEach(file => {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.classList.add('image');
+        img.onload = () => {
+          const maxWidth = scanner.clientWidth;
+          const maxHeight = scanner.clientHeight;
+          let scale = 1;
+          if (img.width > maxWidth || img.height > maxHeight) {
+            scale = Math.min(maxWidth / img.width, maxHeight / img.height);
+          }
+          const scaledWidth = img.width * scale;
+          const scaledHeight = img.height * scale;
+
+          // Assure que l'image garde ses proportions sans dépasser le cadre
+          const aspectRatio = img.width / img.height;
+          if (scaledWidth > maxWidth) {
+            scale = maxWidth / img.width;
+          }
+          if (scaledHeight > maxHeight) {
+            scale = Math.min(scale, maxHeight / img.height);
+          }
+          const finalWidth = img.width * scale;
+          const finalHeight = img.height * scale;
+
+          const x = Math.random() * (scanner.clientWidth - scaledWidth);
+          const y = Math.random() * (scanner.clientHeight - scaledHeight);
+
+          const wrapper = document.createElement('div');
+          wrapper.classList.add('resizable');
+          wrapper.style.position = 'absolute';
+          wrapper.style.left = `${x}px`;
+          wrapper.style.top = `${y}px`;
+          wrapper.style.width = finalWidth + 'px';
+          wrapper.style.height = finalHeight + 'px';
+          wrapper.style.resize = 'both';
+          wrapper.style.overflow = 'hidden';
+          wrapper.style.boxSizing = 'border-box';
+          wrapper.style.border = '1px dashed #888';
+          wrapper.style.zIndex = 1;
+
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.setAttribute('draggable', 'false');
+
+          const controls = document.createElement('div');
+          controls.style.position = 'absolute';
+          controls.style.top = '0';
+          controls.style.left = '0';
+          controls.style.display = 'flex';
+          controls.style.gap = '2px';
+          controls.style.zIndex = '2';
+
+          const plus = document.createElement('button');
+          plus.textContent = '+';
+          plus.style.padding = '0 4px';
+          plus.onclick = () => {
+            const scale = 1.1;
+            wrapper.style.width = wrapper.offsetWidth * scale + 'px';
+            wrapper.style.height = wrapper.offsetHeight * scale + 'px';
+          };
+
+          const minus = document.createElement('button');
+          minus.textContent = '-';
+          minus.style.padding = '0 5px';
+          minus.onclick = () => {
+            const scale = 0.9;
+            wrapper.style.width = wrapper.offsetWidth * scale + 'px';
+            wrapper.style.height = wrapper.offsetHeight * scale + 'px';
+          };
+
+          controls.appendChild(plus);
+          controls.appendChild(minus);
+          wrapper.appendChild(controls);
+          wrapper.appendChild(img);
+          enableDrag(wrapper);
+          enableResize(wrapper);
+          scanner.appendChild(wrapper);
+          wrapper.dataset.x = x;
+          wrapper.dataset.y = y;
+          images.push(wrapper);
+          images.push(img);
+        };
+      });
+    });
+
+    function enableDrag(el) {
+  let offsetX, offsetY;
+  let dragging = false;
+
+  el.addEventListener('mousedown', e => {
+    dragging = true;
+    offsetX = e.offsetX;
+    offsetY = e.offsetY;
+    el.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+    requestAnimationFrame(() => {
+      const x = e.pageX - scanner.offsetLeft - offsetX;
+      const y = e.pageY - scanner.offsetTop - offsetY;
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.dataset.x = x;
+      el.dataset.y = y;
+    });
+  };
+
+  const onMouseUp = () => {
+    dragging = false;
+    el.style.cursor = 'grab';
+  };
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+function startScan() {
+      scanLine.style.display = 'block';
+      scanLine.style.left = '0px';
+      scannedSlices.length = 0;
+
+      let step = 0;
+      const stepSize = parseInt(document.getElementById('scanStep').value, 10) || 15;
+      const sliceWidth = Math.max(1, Math.min(30, stepSize));
+      const totalSteps = Math.ceil(output.width / sliceWidth);
+      const interval = 5000 / totalSteps;
+
+      const scanInterval = setInterval(() => {
+        const sliceX = step * sliceWidth;
+        scanLine.style.left = `${sliceX}px`;
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = sliceWidth;
+        tempCanvas.height = output.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.fillStyle = '#111';
+        tempCtx.fillRect(0, 0, sliceWidth, output.height);
+
+        images.forEach(wrapper => {
+          const img = wrapper.querySelector('img');
+          const x = parseFloat(wrapper.dataset.x);
+          const y = parseFloat(wrapper.dataset.y);
+          const width = wrapper.offsetWidth;
+          const height = wrapper.offsetHeight;
+          const sliceInImage = sliceX - x;
+          if (sliceInImage >= 0 && sliceInImage < width) {
+            tempCtx.drawImage(
+              img,
+              sliceInImage * (img.naturalWidth / width), 0,  // src x, y (scaled)
+              sliceWidth * (img.naturalWidth / width), img.naturalHeight,
+              0, y,
+              sliceWidth, height
+            );
+          }
+        });
+
+        scannedSlices.push(tempCanvas);
+
+        step++;
+        if (step >= totalSteps) {
+          clearInterval(scanInterval);
+          scanLine.style.display = 'none';
+          renderFinalScan(sliceWidth);
+        }
+      }, interval);
+    }
+
+    function renderFinalScan(sliceWidth) {
+      scannedSlices.forEach((slice, index) => {
+        ctx.drawImage(slice, index * sliceWidth, 0);
+      });
+    }
+  
+    function enableResize(el) {
+      const observer = new ResizeObserver(() => {
+        const rect = el.getBoundingClientRect();
+        el.dataset.width = rect.width;
+        el.dataset.height = rect.height;
+      });
+      observer.observe(el);
+    }
+</script>
+</body>
+</html>
